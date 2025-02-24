@@ -1,4 +1,4 @@
-
+from network import *
 
 
 
@@ -11,7 +11,12 @@ if __name__ == '__main__':
     
     # safe rapid program execution routine
 
-    pass
+    rb = RBNetwork()
+
+    rb.query_endpoint('')
+    
+
+
     
 
     

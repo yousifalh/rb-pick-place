@@ -1,13 +1,10 @@
 # Composites Robot Pick and Place
-Description...
-
-# Aims
 
 
 # DHF Notice
-GitHub branches for DH of software.
+History of design can be viewed through branch history.
 
 
 # References
-https://docs.opencv.org/4.x/index.html
+https://docs.opencv.org/4.x/index.html \n
 https://developercenter.robotstudio.com/api/RWS
