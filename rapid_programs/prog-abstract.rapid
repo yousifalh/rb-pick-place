@@ -1,0 +1,60 @@
+MODULE Module1
+    CONST robtarget VISCINITY_OFFSET :=[[0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0,0,0]];
+
+    ! - 
+
+!***********************************************************
+    !
+    ! Module:  Module1
+    !
+    ! Description:
+    !   <Insert description here>
+    !
+    ! Author: yousifalh
+    !
+    ! Version: 1.2
+    !
+    !***********************************************************
+    
+
+    PROC main()
+
+        ! Initialize socket
+        SocketCreate socket1;
+        SocketBind socket1, "0.0.0.0", 1025;
+        SocketListen socket1;
+        Write "Waiting for client connection...";
+
+        ! Accept connection
+        SocketAccept socket1;
+        Write "Client connected.";
+
+        ! Define 
+
+        WHILE TRUE DO
+            ! Receive string data (e.g., "123.45,67.89")
+            SocketReceive socket1, data;
+            Write "Received: ", data;
+
+            ! Find comma position
+            commaPos := StrFind(data, ",");
+            IF commaPos > 0 THEN
+                xStr := StrPart(data, 1, commaPos - 1);
+                yStr := StrPart(data, commaPos + 1, StrLen(data) - commaPos);
+
+                x := StrToVal(xStr);
+                y := StrToVal(yStr);
+
+                Write "Parsed X:", x, " Y:", y;
+            ELSE
+                Write "Invalid format received: ", data;
+            ENDIF
+        ENDWHILE
+
+
+    ENDPROC
+    
+    PROC add_viscinity_offset(VAR robtarget rt)
+
+
+    PROC move_within_viscinity(robtarget )

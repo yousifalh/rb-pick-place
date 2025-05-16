@@ -1,0 +1,187 @@
+MODULE Module1
+    ! ——————————————————————————————————————————
+    ! CONSTANTS & TYPES
+    ! ——————————————————————————————————————————
+    CONST string  DELIM      := ",";                     ! separates x,y in stream
+    CONST string  EOL        := "\n";                    ! terminates each message
+    CONST pos     VIC_OFFSET := [0,0,0];                ! vicinity offset  <‑‑ added
+    CONST num     PORT       := 1025;
+    CONST string  HOST       := "192.168.0.1";
+
+        
+    !---------------------------------------------------------------
+    !  CONFIGURATION
+    !---------------------------------------------------------------
+    CONST num CONST_Z      := 150;                ! height above table (mm)
+    CONST quat CONST_ORIENT:= [0,0,1,0];          ! TCP faces straight down
+    CONST confdata CONST_CFG := [0,0,0,0];        ! pick a joint configuration
+    CONST extjoint CONST_EXT:= [9E9,9E9,9E9,9E9,9E9,9E9]; ! ignore external axes
+
+    ! Optional: fixed shift that centres camera coords on robot frame
+    CONST trans XY_OFFSET := [  0,    0,   0];    ! e.g. camera origin → robot (mm)
+
+    ! ——————————————————————————————————————————
+    ! WORK VARIABLES
+    ! ——————————————————————————————————————————
+    VAR socketdev server_socket;                         ! listening socket
+    VAR socketdev client_socket;                         ! per‑connection handle
+    VAR string     rxbuf := "";                          ! receive buffer      <‑‑ added
+    VAR string     client_ip;
+    VAR robtarget rtTarget;                       ! updated for every message
+
+
+PROC main()
+
+    ! ―― 1.  Create and bind the listening socket ――
+    SocketCreate server_socket;
+    SocketBind   server_socket, "192.168.0.1", 1025;   ! (IP,Port)
+    SocketListen server_socket;
+    TPWrite "Waiting for PC on 192.168.0.1:1025 …";
+
+    WHILE TRUE DO       ! loop forever: accept → stream → close
+
+        ! ―― 2.  Block until the PC connects ――
+        SocketAccept server_socket, client_socket\ClientAddress:=client_ip;
+        TPWrite "[+] Connected from " + client_ip;
+
+        ! ―― 3.  Handshake: expect “READY\n”, reply “ACK\n” ――
+        VAR string hand;
+        SocketReceive client_socket\Str:=hand;
+        IF hand <> "READY" THEN
+            TPWrite "Bad handshake: " + hand;
+            SocketClose client_socket;
+            RETRY;
+        ENDIF
+        SocketSend client_socket\Str:="ACK\n";
+
+        ! ―― 4.  Stream loop: read chunks, parse complete lines ――
+        VAR string rxbuf := "";
+        WHILE TRUE DO
+            VAR string chunk;
+            SocketReceive client_socket\Str:=chunk\StrLen:=256;
+
+            ! peer closed socket ⇒ leave stream loop
+            IF StrLen(chunk)=0 THEN
+                EXIT;
+            ENDIF
+
+            rxbuf := rxbuf + chunk;
+
+            WHILE Instr(1, rxbuf, "\n") > 0 DO
+                VAR num nl := Instr(1, rxbuf, "\n");
+                VAR string line := StrPart(rxbuf, 1, nl-1);
+                rxbuf := StrPart(rxbuf, nl+1, StrLen(rxbuf));
+
+                ! --------- 5.  Parse “x,y” and move  ---------
+                VAR num comma := Instr(1, line, ",");
+                IF comma = 0 THEN
+                    TPWrite "Ignored malformed line: " + line;
+                    CONTINUE;
+                ENDIF
+
+                VAR num x := StrToNum(StrPart(line, 1,       comma-1));
+                VAR num y := StrToNum(StrPart(line, comma+1, StrLen(line)-comma));
+
+                BuildTarget x, y;                         ! fill rtTarget
+                ! TODO: Have an array store all the build targets - will have to 
+                ! change whole structure of program 
+                ! Next iteration of could would 
+                MoveL rtTarget, v100, z10, tool0;         ! execute motion
+            ENDWHILE
+        ENDWHILE
+
+        ! ―― 6.  Clean-up after client disconnect ――
+        TPWrite "[–] Client disconnected";
+        SocketClose client_socket;
+    ENDWHILE
+
+    ! ―― 7.  Fault-tolerant boilerplate ――
+    ERROR
+        TPWrite "Socket error " + NumToStr(ERRNO) + ". Retrying …";
+        RETRY;
+    UNDO
+        SocketClose server_socket;
+        SocketClose client_socket;
+
+ENDPROC
+
+    ! ——————————————————————————————————————————
+    ! 1. LOW‑LEVEL RECEIVE
+    ! ——————————————————————————————————————————
+    FUNC bool ReadOneLine()
+        VAR string chunk;
+        SocketReceive client_socket\Str:=chunk;
+        IF StrLen(chunk)=0 THEN
+            RETURN FALSE;                    ! peer closed
+        ENDIF
+        rxbuf := rxbuf + chunk;
+
+        WHILE Instr(1,rxbuf,EOL) > 0 DO
+            VAR string line := StrPart(rxbuf,1,Instr(1,rxbuf,EOL)-1);
+            rxbuf := StrPart(rxbuf,Instr(1,rxbuf,EOL)+1,StrLen(rxbuf));
+            HandleLine line;
+        ENDWHILE
+        RETURN TRUE;
+    ENDFUNC
+
+    ! ——————————————————————————————————————————
+    ! 2. PARSE  “x,y”
+    ! ——————————————————————————————————————————
+    PROC HandleLine(string line)
+        VAR num comma := Instr(1,line,DELIM);
+        IF comma = 0 THEN
+            TPWrite "Bad line: " + line;
+            RETURN;
+        ENDIF
+        VAR num x := StrToNum(StrPart(line,1,comma-1));
+        VAR num y := StrToNum(StrPart(line,comma+1,StrLen(line)-comma));
+
+        pTarget := [x, y, 0] + VIC_OFFSET;          ! apply vicinity offset   <‑‑ added
+    ENDPROC
+
+    ! ——————————————————————————————————————————
+    ! 3. HANDSHAKE (OPTIONAL BUT HELPFUL)
+    ! ——————————————————————————————————————————
+    PROC WaitForAck()
+        VAR string ack;
+        SocketReceive client_socket\Str:=ack;
+        IF ack <> "READY"+EOL THEN
+            TPWrite "Unexpected handshake: " + ack;
+        ENDIF   
+        SocketSend client_socket\Str:="ACK\n";
+    ENDPROC
+
+    ! ——————————————————————————————————————————
+    ! 4. HIGH‑LEVEL MOTION HELPERS
+    ! ——————————————————————————————————————————
+    PROC MoveWithinVicinity()
+        VAR robtarget rt;
+        ! Fill only translation; keep the last orientation & confdata unchanged
+        rt.trans.x := pTarget.x;
+        rt.trans.y := pTarget.y;
+        rt.trans.z := pTarget.z;
+        rt.rot      := OrientZYX(0,0,0);            ! face forward
+        rt.confdata := [0,0,0,0];                   ! adjust if needed
+        rt.extax    := [9E9,9E9,9E9,9E9,9E9,9E9];
+
+        MoveL rt, v100, z10, tool0;
+    ENDPROC
+ENDMODULE
+
+
+
+!---------------------------------------------------------------
+!  PROCEDURE:  BuildTarget
+!  Purpose   : Fill rtTarget from the latest (x,y) numbers
+!---------------------------------------------------------------
+PROC BuildTarget(num x_mm, num y_mm)
+    VAR trans posXY;
+    posXY.x := x_mm + XY_OFFSET.x;
+    posXY.y := y_mm + XY_OFFSET.y;
+    posXY.z := CONST_Z;                       ! keep constant height
+
+    rtTarget.trans   := posXY;
+    rtTarget.rot     := CONST_ORIENT;
+    rtTarget.confdata:= CONST_CFG;
+    rtTarget.extax   := CONST_EXT;
+ENDPROC
